@@ -1,0 +1,14 @@
+node_modules/ 
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Local Data (Optional - usually better to keep scripts on GitHub, not big JSONs)
+india_master_db.json
+local_environmental_db.json
+*.csv
+
+# Build/Environment
+build/
+.env
+.vscode/
