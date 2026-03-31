@@ -1,91 +1,86 @@
+require('dotenv').config({ path: './token.env' });
 const express = require('express');
-const { spawn } = require('child_process');
 const cors = require('cors');
 const fs = require('fs');
 const axios = require('axios');
-const NodeGeocoder = require('node-geocoder');
+const path = require('path');
+
+const { calculateEcoHealth } = require('./utils/scoringEngine');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 1. Configuration & Data Loading
-const geocoder = NodeGeocoder({ provider: 'openstreetmap' });
+const AQI_TOKEN = process.env.AQI_TOKEN;
 let masterPincodeDB = {};
 
-// Load the National Database into memory once at startup
-// This allows for O(1) constant-time lookups (Instant speed)
+
 try {
-    if (fs.existsSync('./india_master_db.json')) {
-        masterPincodeDB = JSON.parse(fs.readFileSync('./india_master_db.json', 'utf8'));
-        console.log('✅ National Environmental Database Loaded (All-India).');
+    const dbPath = path.join(__dirname, 'india_master_db.json');
+    if (fs.existsSync(dbPath)) {
+        masterPincodeDB = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+        console.log('✅ National Database Loaded.');
     } else {
-        console.error('❌ CRITICAL ERROR: india_master_db.json not found! Run data_generator.js first.');
+        console.log('❌ ERROR: india_master_db.json missing in root!');
     }
 } catch (err) {
-    console.error('❌ Error parsing Master JSON:', err.message);
+    console.error('❌ DB Parse Error:', err.message);
 }
 
-// 2. Search Route (All-India)
 app.get('/search/:pincode', async (req, res) => {
     const pincode = req.params.pincode.trim();
-    const AQI_TOKEN = "4bf818bd9df49d058b1f8f0dbd7540bea57918bf";
+    const localInfo = masterPincodeDB[pincode];
+
+    if (!localInfo) return res.status(404).json({ error: "Pincode not found" });
 
     try {
-        // A. Instant Database Lookup
-        const localInfo = masterPincodeDB[pincode];
-        
-        if (!localInfo) {
-            return res.status(404).json({ error: "Pincode not found in National Database." });
-        }
+        let liveAQI = 75;
+        try {
+            const aqiRes = await axios.get(`https://api.waqi.info/feed/geo:${localInfo.lat};${localInfo.lng}/?token=${process.env.AQI_TOKEN}`, { timeout: 3000 });
+            if (aqiRes.data?.data?.aqi) liveAQI = aqiRes.data.data.aqi;
+        } catch (e) { console.log("⚠️ AQI Timeout"); }
 
-        // B. Get City Name (For Display & Fallbacks)
-        // We still use Geocoder to get the real Name of the place, but not the Greenery
-        const geo = await geocoder.geocode({ address: pincode, country: 'India' });
-        const cityName = geo[0]?.city || geo[0]?.state || localInfo.s;
-        const formattedAddress = geo[0]?.formattedAddress || `${cityName}, ${localInfo.s}`;
 
-        // C. Fetch ONLY Live AQI (The only slow part, but necessary for real-time)
-        const aqiRes = await axios.get(`https://api.waqi.info/feed/@${pincode}/?token=${AQI_TOKEN}`).catch(() => null);
-        let liveAQI = aqiRes?.data?.status === "ok" ? aqiRes.data.data.aqi : null;
+        let liveGreenScore = localInfo.g; 
+        try {
+            
+            const overpassUrl = `https://overpass-api.de/api/interpreter?data=[out:json][timeout:3];way["leisure"="park"](around:800,${localInfo.lat},${localInfo.lng});out count;`;
+            const greenRes = await axios.get(overpassUrl, { timeout: 5000 });
+            const count = parseInt(greenRes?.data?.elements[0]?.tags?.total) || 0;
+            
+            liveGreenScore = Math.min(100, (count * 15) + 20); 
+        } catch (e) { console.log("⚠️ Greenery API Timeout - Using DB Fallback"); }
 
-        // Fallback to City-level AQI if Pincode station is empty
-        if (!liveAQI) {
-            const fallback = await axios.get(`https://api.waqi.info/feed/${cityName}/?token=${AQI_TOKEN}`).catch(() => null);
-            liveAQI = fallback?.data?.data?.aqi || 75; // 75 is a safe urban average
-        }
-
-        // D. Combine Data (Instant - pulled from local JSON)
         const combinedData = {
-            Ward_Name: formattedAddress,
+            Ward_Name: localInfo.city,
             Pincode: pincode,
-            Green_Score: localInfo.g,      // <--- Pulled instantly from your 19k database
+            Lat: localInfo.lat,
+            Lng: localInfo.lng,
+            Green_Score: liveGreenScore, 
             AQI_Value: liveAQI, 
-            Noise_Pollution_Score: 45,     // Baseline urban noise
-            Waste_Mgmt_Score: localInfo.w  // <--- Pulled instantly from your 19k database
+            Noise_Pollution_Score: localInfo.n, 
+            Waste_Mgmt_Score: localInfo.w,
+            Water_Quality_Score: localInfo.h2o
         };
 
-        // E. Python ML Scoring Engine
-        // We "spawn" the python script to run our Regression/Clustering math
-        const pythonProcess = spawn('python', ['analysis_engine.py', JSON.stringify(combinedData)]);
+        const finalResult = calculateEcoHealth(combinedData);
+        finalResult.coordinates = { lat: localInfo.lat, lng: localInfo.lng };
         
-        let pythonOutput = "";
-        pythonProcess.stdout.on('data', (data) => { pythonOutput += data.toString(); });
-        
-        pythonProcess.on('close', (code) => {
-            if (code !== 0) return res.status(500).json({ error: "ML Engine Error" });
-            try {
-                res.json(JSON.parse(pythonOutput));
-            } catch (e) {
-                res.status(500).json({ error: "Data Parsing Error" });
-            }
-        });
+        res.json(finalResult);
 
     } catch (error) {
-        console.error("Search Error:", error.message);
+        console.error("Critical Route Error:", error.message);
         res.status(500).json({ error: "Internal Server Error" });
     }
 });
 
+app.use((err, req, res, next) => {
+    console.error("!!! SERVER CRASH !!!", err.stack);
+    res.status(500).json({ 
+        error: "Internal Server Error", 
+        details: err.message 
+    });
+});
+
 const PORT = 5000;
-app.listen(PORT, () => console.log(`🚀 All-India Eco-Health API live on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 API active on http://localhost:${PORT}`));

@@ -1,168 +1,183 @@
 import React, { useState } from 'react';
+import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import axios from 'axios';
+import { MapContainer, TileLayer, Circle } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import WaterDetails from './pages/WaterDetails';
 
-// 1. Enhanced Progress Bar with Animated Gradients
-const ProgressBar = ({ label, value, color }) => (
-  <div style={styles.progressContainer}>
-    <div style={styles.progressLabel}>
-      <span>{label}</span>
-      <span style={{ color: color, fontWeight: 'bold' }}>{value}%</span>
+// Import Sub-pages
+import AQIDetails from './pages/AQIDetails';
+import GreenDetails from './pages/GreenDetails';
+
+// 1. Updated MetricCard Component
+const MetricCard = ({ label, value, color, path, icon, rawData }) => (
+  <Link 
+    to={path} 
+    state={{ label, value, color, icon, rawData }} 
+    style={styles.cardLink}
+  >
+    <div style={styles.card}>
+      <div style={styles.cardHeader}>
+        <span style={styles.cardIcon}>{icon}</span>
+        <span style={styles.cardLabel}>{label}</span>
+      </div>
+      <div style={styles.cardValue}>{value}%</div>
+      <div style={styles.progressBase}>
+        <div 
+          style={{ 
+            ...styles.progressFill, 
+            width: `${value}%`, 
+            background: `linear-gradient(90deg, ${color}88, ${color})`,
+            boxShadow: `0 0 8px ${color}44` 
+          }} 
+        />
+      </div>
+      <span style={{ ...styles.cardFooter, color: color }}>
+        View {label} Analysis →
+      </span>
     </div>
-    <div style={styles.progressTrack}>
-      <div 
-        style={{ 
-          ...styles.progressFill, 
-          width: `${value}%`, 
-          background: `linear-gradient(90deg, ${color}cc, ${color})`,
-          boxShadow: `0 0 10px ${color}44`
-        }} 
-      />
-    </div>
-  </div>
+  </Link>
 );
 
-const App = () => {
+// 2. Main Dashboard Component
+const Dashboard = () => {
   const [pincode, setPincode] = useState('');
   const [result, setResult] = useState(null);
-  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSearch = async () => {
-    if (!pincode || pincode.length !== 6) {
-      setError("Please enter a valid 6-digit Pincode.");
-      return;
-    }
+    if (pincode.length !== 6) return alert("Enter a 6-digit Pincode");
+    setLoading(true);
     try {
-      setLoading(true);
-      setError('');
       const res = await axios.get(`http://localhost:5000/search/${pincode}`);
       setResult(res.data);
     } catch (err) {
-      setError(err.response?.status === 404 ? "Pincode not found." : "Server Error.");
-      setResult(null);
+      alert("Error: Check if backend server is running.");
     } finally {
       setLoading(false);
     }
   };
 
-  // Dynamic Theme Logic
-  const getThemeColor = (cat) => {
-    if (cat === 'Eco-Rich' || cat === 'Good') return '#27ae60';
-    if (cat === 'Average' || cat === 'Fair') return '#f39c12';
-    return '#e74c3c';
-  };
-
-  const themeColor = result ? getThemeColor(result.category) : '#2d6a4f';
-
   return (
-    <div style={{...styles.page, background: `linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)`}}>
-      
-      {/* Header Section */}
-      <div style={styles.header}>
-        <h1 style={styles.mainTitle}>Eco-Health <span style={{color: '#2d6a4f'}}>Intelligence</span></h1>
-        <p style={styles.subTitle}>National Environmental Monitoring & Scoring System</p>
-      </div>
-
-      {/* Search Section */}
-      <div style={styles.searchCard}>
-        <div style={styles.searchBox}>
+    <div style={styles.container}>
+      <header style={styles.header}>
+        <h1 style={styles.title}>Eco-Health <span style={{color: '#2ecc71'}}>Intelligence</span></h1>
+        <div style={styles.searchBar}>
           <input 
-            type="text" 
-            placeholder="Search Pincode (e.g., 400001)" 
-            value={pincode}
-            onChange={(e) => setPincode(e.target.value)}
-            style={styles.input}
+            style={styles.input} 
+            placeholder="Enter Pincode..." 
+            value={pincode} 
+            onChange={(e) => setPincode(e.target.value)} 
           />
-          <button onClick={handleSearch} style={{...styles.button, backgroundColor: '#2d6a4f'}}>
-            {loading ? 'ANALYZING...' : 'CHECK HEALTH'}
+          <button style={styles.searchBtn} onClick={handleSearch}>
+            {loading ? 'Analyzing...' : 'Check Area'}
           </button>
         </div>
-        {error && <p style={styles.errorText}>{error}</p>}
-      </div>
+      </header>
 
-      {/* Result Card */}
       {result && (
-        <div style={{...styles.resultCard, borderTop: `8px solid ${themeColor}`}}>
-          <div style={styles.resultHeader}>
-            <div style={circleStyle(themeColor)}>
-              <span style={styles.scoreNumber}>{result.total_score}</span>
-              <small style={styles.scoreLabel}>HEALTH INDEX</small>
+        <main style={styles.main}>
+          <div style={styles.scoreSection}>
+            <div style={{...styles.mainScoreCircle, borderColor: result.total_score > 60 ? '#2ecc71' : '#f1c40f'}}>
+              <span style={styles.scoreText}>{result.total_score}</span>
+              <small style={{color: '#94a3b8', fontWeight: 'bold'}}>HEALTH INDEX</small>
             </div>
-            <div style={styles.infoArea}>
-              <h2 style={styles.areaName}>{result.area_name}</h2>
-              <div style={{...styles.statusBadge, backgroundColor: `${themeColor}22`, color: themeColor}}>
-                ● {result.category} Zone
-              </div>
-              <p style={styles.timestamp}>Real-time Satellite & Sensor Fusion Active</p>
-            </div>
+            <h2 style={styles.cityName}>{result.area_name}</h2>
+            <p style={styles.badge}>● {result.category} Zone</p>
           </div>
 
           <div style={styles.grid}>
-            <ProgressBar label="Green Cover" value={result.breakdown.green} color="#2ecc71" />
-            <ProgressBar label="Waste Efficiency" value={result.breakdown.waste} color="#e67e22" />
-            <ProgressBar label="Air Quality Index" value={result.breakdown.aqi} color="#f1c40f" />
-            <ProgressBar label="Noise Score" value={result.breakdown.reports} color="#3498db" />
+            <MetricCard 
+            label="Air Quality" 
+            value={result.breakdown.aqi} 
+            color="#f59e0b" 
+            icon="🌬️" 
+            path="/details/aqi" 
+            rawData={result} 
+            />
+            <MetricCard 
+            label="Green Cover" 
+            value={result.breakdown.green} 
+            color="#10b981" 
+            icon="🌿" 
+            path="/details/green" 
+            rawData={result} 
+            />
+            <MetricCard 
+              label="Water Purity" 
+              value={result.breakdown.water} // Mapping the new 'water' breakdown
+              color="#0ea5e9" 
+              icon="💧" 
+              path="/details/water" 
+              rawData={result} 
+            />
+            <MetricCard 
+              label="Waste Mgmt" 
+              value={result.breakdown.waste} 
+              color="#6366f1" 
+              icon="♻️" 
+              path="/details/waste" 
+              rawData={result} 
+            />
+            <MetricCard 
+              label="Quietness" 
+              value={result.breakdown.reports} 
+              color="#3b82f6" 
+              icon="🔊" 
+              path="/details/noise" 
+              rawData={result} 
+            />
+            </div>
+
+          <div style={styles.mapWrapper}>
+            <MapContainer center={[result.coordinates.lat, result.coordinates.lng]} zoom={14} style={{height: '100%', width: '100%'}}>
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              <Circle center={[result.coordinates.lat, result.coordinates.lng]} radius={1000} pathOptions={{ color: '#2ecc71' }} />
+            </MapContainer>
           </div>
-        </div>
-      )}    </div>
+        </main>
+      )}
+    </div>
   );
 };
 
-// Styles and Animations
-const circleStyle = (color) => ({
-  width: '160px', height: '160px', borderRadius: '50%',
-  border: `12px solid ${color}22`, borderTop: `12px solid ${color}`,
-  display: 'flex', flexDirection: 'column', justifyContent: 'center',
-  alignItems: 'center', marginRight: '40px', backgroundColor: '#fff',
-  boxShadow: '0 10px 20px rgba(0,0,0,0.05)', transition: 'all 0.5s ease'
-});
-
+// 3. Styles Object
 const styles = {
-  page: { padding: '60px 20px', minHeight: '100vh', fontFamily: 'Inter, system-ui, sans-serif' },
-  header: { textAlign: 'center', marginBottom: '40px' },
-  mainTitle: { fontSize: '3rem', margin: '0', color: '#1a1a1a', fontWeight: '800', letterSpacing: '-1px' },
-  subTitle: { color: '#555', fontSize: '1.1rem', marginTop: '10px' },
-  searchCard: { 
-    maxWidth: '700px', margin: '0 auto 30px', background: 'rgba(255,255,255,0.9)', 
-    padding: '20px', borderRadius: '20px', backdropFilter: 'blur(10px)',
-    boxShadow: '0 20px 40px rgba(0,0,0,0.05)'
-  },
-  searchBox: { display: 'flex', gap: '15px' },
-  input: { 
-    flex: 1, padding: '15px 25px', borderRadius: '15px', border: '2px solid #eee', 
-    fontSize: '18px', outline: 'none', transition: '0.3s' 
-  },
-  button: { 
-    padding: '15px 35px', color: 'white', border: 'none', borderRadius: '15px', 
-    cursor: 'pointer', fontWeight: 'bold', fontSize: '16px', letterSpacing: '1px' 
-  },
-  resultCard: { 
-    maxWidth: '900px', margin: '0 auto', background: '#fff', padding: '50px', 
-    borderRadius: '30px', boxShadow: '0 30px 60px rgba(0,0,0,0.12)',
-    animation: 'slideUp 0.6s ease-out'
-  },
-  resultHeader: { display: 'flex', alignItems: 'center', marginBottom: '50px' },
-  scoreNumber: { fontSize: '56px', fontWeight: '900', color: '#1a1a1a', margin: 0 },
-  scoreLabel: { fontSize: '10px', fontWeight: '800', color: '#999', letterSpacing: '2px' },
-  infoArea: { flex: 1 },
-  areaName: { fontSize: '2.2rem', margin: '0 0 10px 0', color: '#2c3e50' },
-  statusBadge: { display: 'inline-block', padding: '8px 20px', borderRadius: '30px', fontWeight: 'bold', fontSize: '14px' },
-  timestamp: { color: '#999', fontSize: '13px', marginTop: '15px' },
-  grid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px' },
-  progressContainer: { marginBottom: '5px' },
-  progressLabel: { display: 'flex', justifyContent: 'space-between', marginBottom: '10px', fontSize: '14px', fontWeight: '600' },
-  progressTrack: { height: '10px', width: '100%', backgroundColor: '#f0f0f0', borderRadius: '10px' },
-  progressFill: { height: '100%', borderRadius: '10px', transition: 'width 1.5s cubic-bezier(0.1, 0.5, 0.1, 1)' },
-  errorText: { color: '#e74c3c', textAlign: 'center', fontWeight: 'bold', marginTop: '15px' }
+  container: { minHeight: '100vh', background: '#f8fafc', padding: '40px 20px', fontFamily: 'Inter, sans-serif' },
+  header: { textAlign: 'center', marginBottom: '50px' },
+  title: { fontSize: '2.8rem', fontWeight: '900', color: '#0f172a' },
+  searchBar: { background: '#fff', padding: '8px', borderRadius: '16px', display: 'inline-flex', boxShadow: '0 10px 15px rgba(0,0,0,0.05)' },
+  input: { border: 'none', padding: '12px 20px', outline: 'none', width: '280px', fontSize: '16px' },
+  searchBtn: { background: '#0f172a', color: '#fff', border: 'none', padding: '12px 25px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' },
+  main: { maxWidth: '1000px', margin: '0 auto' },
+  scoreSection: { textAlign: 'center', marginBottom: '40px' },
+  mainScoreCircle: { width: '150px', height: '150px', borderRadius: '50%', border: '8px solid', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', margin: '0 auto 20px', background: '#fff' },
+  scoreText: { fontSize: '3.5rem', fontWeight: '900' },
+  cityName: { fontSize: '1.8rem', margin: '0', fontWeight: '700' },
+  badge: { display: 'inline-block', padding: '6px 16px', background: '#e2e8f0', borderRadius: '100px', fontSize: '13px', fontWeight: 'bold', marginTop: '10px' },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px', marginBottom: '40px' },
+  cardLink: { textDecoration: 'none' },
+  card: { background: '#fff', padding: '24px', borderRadius: '24px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', transition: '0.3s' },
+  cardHeader: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px' },
+  cardIcon: { fontSize: '24px' },
+  cardLabel: { fontSize: '11px', fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase' },
+  cardValue: { fontSize: '32px', fontWeight: '900', color: '#1e293b' },
+  progressBase: { height: '8px', background: '#f1f5f9', borderRadius: '10px', overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: '10px', transition: 'width 1s ease' },
+  cardFooter: { display: 'block', marginTop: '15px', fontSize: '11px', fontWeight: 'bold', textAlign: 'right' },
+  mapWrapper: { height: '400px', borderRadius: '24px', overflow: 'hidden', border: '10px solid #fff', boxShadow: '0 20px 25px rgba(0,0,0,0.1)' }
 };
 
-// Global Animation Styles
-const styleSheet = document.createElement("style");
-styleSheet.innerText = `
-  @keyframes slideUp { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: translateY(0); } }
-  input:focus { border-color: #2d6a4f !important; box-shadow: 0 0 0 4px rgba(45, 106, 79, 0.1); }
-  button:hover { transform: translateY(-2px); filter: brightness(1.1); box-shadow: 0 10px 20px rgba(45, 106, 79, 0.2); }
-`;
-document.head.appendChild(styleSheet);
+// 4. Main App Component with Routing
+const App = () => (
+  <Router>
+    <Routes>
+      <Route path="/" element={<Dashboard />} />
+      <Route path="/details/aqi" element={<AQIDetails />} />
+      <Route path="/details/green" element={<GreenDetails />} />
+      <Route path="/details/water" element={<WaterDetails />} />
+    </Routes>
+  </Router>
+);
 
 export default App;
